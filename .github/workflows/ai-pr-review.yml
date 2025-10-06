@@ -1,4 +1,4 @@
-name: AI Review with OpenAI
+name: AI Review with Gemini
 
 on:
   pull_request:
@@ -47,50 +47,45 @@ jobs:
             echo "EOF"
           } >> $GITHUB_OUTPUT
 
-      - name: Call OpenAI API
+      - name: Call Gemini API
         id: ai_review
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PR_TITLE: ${{ steps.pr_info.outputs.title }}
           PR_BODY: ${{ steps.pr_info.outputs.body }}
           PR_DIFF: ${{ steps.diff.outputs.diff }}
         run: |
-          # Create JSON payload
+          # Create JSON payload for Gemini
           PAYLOAD=$(jq -n \
             --arg title "$PR_TITLE" \
             --arg body "$PR_BODY" \
             --arg diff "$PR_DIFF" \
             '{
-              "model": "gpt-4o",
-              "messages": [
-                {
-                  "role": "system",
-                  "content": "You are an expert code reviewer. Provide constructive, actionable feedback."
-                },
-                {
-                  "role": "user",
-                  "content": ("Review this pull request:\n\n**Title:** " + $title + "\n\n**Description:**\n" + $body + "\n\n**Code Changes:**\n```diff\n" + $diff + "\n```\n\nProvide feedback on:\n1. Code Quality\n2. Potential Bugs\n3. Security Issues\n4. Performance\n5. Suggestions\n\nFormat in markdown.")
-                }
-              ],
-              "temperature": 0.3,
-              "max_tokens": 2000
+              "contents": [{
+                "parts": [{
+                  "text": ("You are an expert code reviewer. Review this pull request and provide constructive, actionable feedback.\n\n**PR Title:** " + $title + "\n\n**Description:**\n" + $body + "\n\n**Code Changes:**\n```diff\n" + $diff + "\n```\n\nProvide feedback on:\n1. Code Quality\n2. Potential Bugs\n3. Security Issues\n4. Performance\n5. Best Practice Suggestions\n\nFormat your response in markdown.")
+                }]
+              }],
+              "generationConfig": {
+                "temperature": 0.3,
+                "maxOutputTokens": 2000
+              }
             }')
           
-          # Call OpenAI API
-          RESPONSE=$(curl -s https://api.openai.com/v1/chat/completions \
+          # Call Gemini API
+          RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY" \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $OPENAI_API_KEY" \
             -d "$PAYLOAD")
           
           echo "API Response: $RESPONSE"
           
           # Extract review
-          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // "Failed to get review"')
+          REVIEW=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Failed to get review"')
           
           # Check for API errors
           ERROR=$(echo "$RESPONSE" | jq -r '.error.message // empty')
           if [ ! -z "$ERROR" ]; then
-            REVIEW="⚠️ **OpenAI API Error:** $ERROR"
+            REVIEW="⚠️ **Gemini API Error:** $ERROR"
           fi
           
           {
@@ -107,5 +102,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## 🤖 AI Code Review\n\n${{ steps.ai_review.outputs.review }}\n\n---\n*Automated review by GPT-4 • Use your best judgment*`
+              body: `## 🤖 AI Code Review (Gemini)\n\n${{ steps.ai_review.outputs.review }}\n\n---\n*Automated review by Google Gemini 1.5 Flash • Use your best judgment*`
             })
