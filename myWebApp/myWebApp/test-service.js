@@ -1,7 +1,6 @@
 // user-service.js
 
 const users = [];
-
 // Get user by ID
 function getUserById(id) {
   for (var i = 0; i < users.length; i++) {
