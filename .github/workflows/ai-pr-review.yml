@@ -17,22 +17,22 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+          
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
-
+        
       - name: Get PR diff
         id: diff
         run: |
           git fetch origin ${{ github.event.pull_request.base.ref }}
           DIFF=$(git diff origin/${{ github.event.pull_request.base.ref }}...HEAD)
-          DIFF_TRUNCATED=$(echo "$DIFF" | head -c 30000)
+          DIFF_TRUNCATED=$(echo "$DIFF" | head -c 50000)
           {
             echo "diff<<EOF"
             echo "$DIFF_TRUNCATED"
             echo "EOF"
           } >> $GITHUB_OUTPUT
-
+          
       - name: Get PR info
         id: pr_info
         run: |
@@ -46,7 +46,7 @@ jobs:
             echo "${{ github.event.pull_request.body }}"
             echo "EOF"
           } >> $GITHUB_OUTPUT
-
+          
       - name: Call Gemini API
         id: ai_review
         env:
@@ -63,29 +63,33 @@ jobs:
             '{
               "contents": [{
                 "parts": [{
-                  "text": ("You are an expert code reviewer. Review this pull request and provide constructive, actionable feedback.\n\n**PR Title:** " + $title + "\n\n**Description:**\n" + $body + "\n\n**Code Changes:**\n```diff\n" + $diff + "\n```\n\nProvide feedback on:\n1. Code Quality\n2. Potential Bugs\n3. Security Issues\n4. Performance\n5. Best Practice Suggestions\n\nFormat your response in markdown.")
+                  "text": ("You are an expert code reviewer. Review this pull request and provide constructive, actionable feedback.\n\n**PR Title:** " + $title + "\n\n**Description:**\n" + $body + "\n\n**Code Changes:**\n```diff\n" + $diff + "\n```\n\nProvide feedback on:\n1. Code Quality & Readability\n2. Potential Bugs & Edge Cases\n3. Security Issues\n4. Performance Concerns\n5. Best Practice Suggestions\n6. Testing Recommendations\n\nBe concise and constructive. Format your response in markdown with clear sections.")
                 }]
               }],
               "generationConfig": {
                 "temperature": 0.3,
-                "maxOutputTokens": 2000
+                "maxOutputTokens": 2048
               }
             }')
           
-          # Call Gemini API with v1 endpoint
-          RESPONSE=$(curl -s "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY" \
+          # Call Gemini API with gemini-2.5-flash (CORRECT MODEL)
+          RESPONSE=$(curl -s --retry 3 --retry-delay 2 --max-time 30 \
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$GEMINI_API_KEY" \
             -H "Content-Type: application/json" \
             -d "$PAYLOAD")
           
-          echo "API Response: $RESPONSE"
+          echo "API Response received"
           
           # Extract review
-          REVIEW=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "Failed to get review"')
+          REVIEW=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // empty')
           
           # Check for API errors
           ERROR=$(echo "$RESPONSE" | jq -r '.error.message // empty')
+          
           if [ ! -z "$ERROR" ]; then
-            REVIEW="⚠️ **Gemini API Error:** $ERROR"
+            REVIEW="⚠️ **Gemini API Error:** $ERROR\n\nPlease check:\n- API key is valid\n- API quota is not exceeded\n- Network connectivity"
+          elif [ -z "$REVIEW" ]; then
+            REVIEW="⚠️ **No review generated**\n\nThe API response was empty or invalid. Please check the workflow logs for details."
           fi
           
           {
@@ -93,7 +97,7 @@ jobs:
             echo "$REVIEW"
             echo "EOF"
           } >> $GITHUB_OUTPUT
-
+          
       - name: Post review comment
         uses: actions/github-script@v7
         with:
@@ -102,5 +106,10 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `## 🤖 AI Code Review (Gemini)\n\n${{ steps.ai_review.outputs.review }}\n\n---\n*Automated review by Google Gemini 1.5 Flash • Use your best judgment*`
+              body: `## 🤖 AI Code Review (Gemini 2.5 Flash)
+            
+            ${{ steps.ai_review.outputs.review }}
+            
+            ---
+            *Automated review by Google Gemini 2.5 Flash • Generated at ${new Date().toISOString()} • Use your best judgment*`
             })
