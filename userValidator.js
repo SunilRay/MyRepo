@@ -65,8 +65,3 @@ module.exports = {
     calculateDiscount,
     addToCache
 };
-EOF
-
-git add userValidator.js
-git commit -m "Add user validation module"
-git push origin feature/add-user-validation
